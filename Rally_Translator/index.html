@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Rally API Query Translator</title>
+    <!-- Link to Pico CSS CDN -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2.0.6/css/pico.min.css">
+    <!-- Link to your custom CSS file -->
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body class="p-4">
+    <main class="container">
+        <header>
+            <h1>Rally API Query Translator</h1>
+            <p>Paste your Rally UI query to convert it into a valid REST API query string.</p>
+        </header>
+
+        <article id="input-card">
+            <label for="rally-query">Rally UI Query</label>
+            <textarea
+                id="rally-query"
+                placeholder="e.g. (State = Open) AND (Owner = user@example.com)"
+            >((parent.formattedID = PGM519) and (ProductArea = "D-RAD") AND (ProductRoadmapQuarterStatus = "Committed") and (State != Done))</textarea>
+
+            <div class="flex-container">
+                <div>
+                    <span class="text-sm text-slate-400">Load example:</span>
+                    <div id="test-cases-container">
+                        <!-- Test case buttons will be injected here by JavaScript -->
+                    </div>
+                </div>
+                <button id="translate-button">
+                    Translate
+                </button>
+            </div>
+        </article>
+
+        <div id="error-message" role="alert" class="hidden">
+            <strong>Error:</strong>
+            <span id="error-text"></span>
+        </div>
+
+        <div id="results-container" class="hidden">
+            <article>
+                <div class="flex-container">
+                    <label>Rally API Query URL</label>
+                    <button id="copy-full-url" class="copy-button">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 copy-icon" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 check-icon hidden" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 13l4 4L19 7" /></svg>
+                        <span class="copy-text">Copy</span>
+                    </button>
+                </div>
+                <pre class="h-28 overflow-auto"><code id="full-url-value"></code></pre>
+            </article>
+
+            <!-- Debugging sections (commented out in original, kept commented here) -->
+            <!--
+            <details class="mt-6">
+                <summary>Debugging Details (Decoded Query & Encoded Query)</summary>
+                <div class="debugging-details-content space-y-4">
+                    <article id="decoded-query-card">
+                        <h3>Decoded Query</h3>
+                        <div class="flex-container">
+                            <pre class="h-28 overflow-auto w-full"><code id="decoded-query-value"></code></pre>
+                            <button id="copy-decoded-query" class="copy-button">
+                                <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 copy-icon" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>
+                                <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 check-icon hidden" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 13l4 4L19 7" /></svg>
+                                <span class="copy-text">Copy</span>
+                            </button>
+                        </div>
+                    </article>
+
+                    <article id="encoded-query-card">
+                        <h3>URL-Encoded Query</h3>
+                        <div class="flex-container">
+                            <pre class="h-28 overflow-auto w-full"><code id="encoded-query-value"></code></pre>
+                            <button id="copy-encoded-query" class="copy-button">
+                                <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 copy-icon" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>
+                                <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 check-icon hidden" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 13l4 4L19 7" /></svg>
+                                <span class="copy-text">Copy</span>
+                            </button>
+                        </div>
+                    </article>
+                </div>
+            </details>
+            -->
+        </div>
+    </main>
+
+    <!-- Link to your JavaScript file -->
+    <script src="js/script.js"></script>
+</body>
+</html>
