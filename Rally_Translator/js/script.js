@@ -49,83 +49,199 @@ document.addEventListener('DOMContentLoaded', () => {
     const toPascalCase = (str) => str ? str.replace(/\w+/g, w => w[0].toUpperCase() + w.slice(1)).replace(/\s/g, '') : '';
 
     const translateRallyQuery = (query) => {
-        const rawTokens = query.match(/"[^"]*"|\(|\)|!=|!contains|contains|=|>|<|\bAND\b|\bOR\b|[\w\s.]+/g) || [];
-        if (rawTokens.length === 0 && query.trim() !== '') throw new Error("Could not parse the query. Check syntax.");
-        const tokens = [];
-        const operatorsAndParens = new Set(['(', ')', '=', '!=', '>', '<', 'contains', '!contains']);
-        rawTokens.forEach(rawToken => {
-            const t = rawToken.trim();
-            if (t === '') return;
-            if (t.length > 1 && t.endsWith(')')) {
-                const partBeforeParen = t.slice(0, -1).trim();
-                if (!operatorsAndParens.has(partBeforeParen.toLowerCase())) {
-                    tokens.push(partBeforeParen);
-                    tokens.push(')');
-                    return;
-                }
-            }
-            tokens.push(t);
-        });
-        const expressions = [];
-        const logicalOperators = [];
-        const operators = new Set(['=', '!=', '>', '<', 'contains', '!contains']);
-        let i = 0;
-        while (i < tokens.length) {
-            let token = tokens[i];
-            const lowerToken = token.toLowerCase();
-            if (lowerToken === 'and' || lowerToken === 'or') {
-                if (expressions.length > 0) logicalOperators.push(token.toUpperCase());
-                i++;
-                continue;
-            }
-            if (token === '(') {
-                let balance = 1;
-                let j = i + 1;
-                while (j < tokens.length && balance > 0) {
-                    if (tokens[j] === '(') balance++;
-                    if (tokens[j] === ')') balance--;
-                    j++;
-                }
-                if (balance !== 0) throw new Error("Mismatched parentheses.");
-                const subQuery = tokens.slice(i + 1, j - 1).join(' ');
-                const subTranslation = translateRallyQuery(subQuery);
-                expressions.push(subTranslation.decodedQuery);
-                i = j;
-                continue;
-            }
-            const [fieldToken, operatorToken, valueToken] = [tokens[i], tokens[i + 1], tokens[i + 2]];
-            if (!fieldToken || !operatorToken || !valueToken || !operators.has(operatorToken.toLowerCase())) {
-                i++;
-                continue;
-            }
-            let finalField;
-            if (fieldToken.includes('.')) {
-                const parts = fieldToken.split('.').map(part => {
-                    const casedPart = toPascalCase(part);
-                    return CONFIRMED_FIELDS.has(casedPart) ? casedPart : part;
-                });
-                finalField = parts.join('.');
-            } else {
-                const pascalCased = toPascalCase(fieldToken);
-                finalField = CONFIRMED_FIELDS.has(pascalCased) ? pascalCased : `c_${pascalCased}`;
-            }
-            let finalValue = valueToken;
-            if (!finalValue.startsWith('"') && !/^\d+$/.test(finalValue) && !['true', 'false'].includes(finalValue.toLowerCase())) {
-                finalValue = `"${finalValue}"`;
-            }
-            expressions.push(`(${finalField} ${operatorToken.toLowerCase()} ${finalValue})`);
-            i += 3;
-        }
-        if (expressions.length === 0) return { decodedQuery: '', encodedQuery: '', fullExampleUrl: '' };
-        if (expressions.length !== logicalOperators.length + 1) throw new Error("Invalid query structure.");
-        let decodedQuery = expressions[0];
-        for (let k = 0; k < logicalOperators.length; k++) {
-            decodedQuery = `(${decodedQuery} ${logicalOperators[k]} ${expressions[k + 1]})`;
-        }
-        const encodedQuery = encodeURIComponent(decodedQuery);
-        const fullExampleUrl = `https://rally1.rallydev.com/slm/webservice/v2.0/portfolioitem/ppmproject?query=${encodedQuery}`;
-        return { decodedQuery, encodedQuery, fullExampleUrl };
+      // Normalización base
+      const normQuotes = (s) => s.replace(/[“”]/g, '"').replace(/[‘’]/g, "'");
+      let s = normQuotes(String(query || "")).replace(/\r|\n/g, " ").trim();
+      if (!s) return { decodedQuery: "", encodedQuery: "", fullExampleUrl: "" };
+
+      // Casing mínimo alineado a tus “correctos”
+      s = s
+        .replace(/\bparent\.formattedid\b/gi, "Parent.FormattedID")
+        .replace(/\bmilestones\.objectid\b/gi, "Milestones.ObjectID")
+        .replace(/\btags\.name\b/gi, "Tags.Name")
+        .replace(/\bstate\b/gi, "State")
+        .replace(/\bstatus\b/gi, "status");
+
+      // Quotes SOLO para RHS de *FormattedID si es string sin comillas
+      s = quoteFormattedIdValues(s);
+
+      // Balanceo obvio de paréntesis
+      s = balanceParens(s);
+
+      // Normalización L→R (AND/OR) en todos los niveles
+      const core0 = unwrapOuterOnce(s);
+      const core  = normalizeL2RDeep(core0);
+
+      // Wrapper final solo si aún no está completamente envuelto
+      const decodedQuery = isWrapped(core) ? core : `(${core})`;
+
+      // Encode dejando () literales
+      const encodedQuery = encodeURIComponent(decodedQuery)
+        .replace(/%28/g, "(").replace(/%29/g, ")");
+
+      const fullExampleUrl =
+        `https://rally1.rallydev.com/slm/webservice/v2.0/portfolioitem/ppmproject?query=${encodedQuery}`;
+
+      return { decodedQuery, encodedQuery, fullExampleUrl };
     };
+
+    // Cita RHS si el campo termina en "FormattedID" (case-insensitive) y RHS es string sin comillas
+    function quoteFormattedIdValues(input) {
+      const re = /((?:\b[\w]+(?:\.[\w]+)*)\.?FormattedID)\s*(=|!=)\s*("[^"]*"|'[^']*'|[A-Za-z][A-Za-z0-9_\-]*)/gi;
+      return input.replace(re, (_m, field, op, rhs) => {
+        const isQuoted  = /^".*"$/.test(rhs) || /^'.*'$/.test(rhs);
+        const isNumeric = /^-?\d+(\.\d+)?$/.test(rhs);
+        let valueOut = rhs;
+        if (!isQuoted && !isNumeric) valueOut = `"${rhs}"`;
+        if (/^'.*'$/.test(valueOut)) valueOut = `"${valueOut.slice(1, -1)}"`;
+        return `${field} ${op} ${valueOut}`;
+      });
+    }
+
+    // Balanceo global de paréntesis (prepend '(' si minDepth<0; append ')' si depth>0)
+    function balanceParens(s) {
+      let depth = 0, minDepth = 0;
+      for (let i = 0; i < s.length; i++) {
+        const c = s[i];
+        if (c === "(") depth++;
+        else if (c === ")") { depth--; if (depth < minDepth) minDepth = depth; }
+      }
+      const needPrepend = -minDepth;
+      const needAppend  = depth > 0 ? depth : 0;
+      if (needPrepend > 0 || needAppend > 0) {
+        return `${"(".repeat(needPrepend)}${s}${")".repeat(needAppend)}`;
+      }
+      return s;
+    }
+
+    // Quita UN par exterior si envuelve toda la expresión
+    function unwrapOuterOnce(s) {
+      const t = s.trim();
+      if (!t.startsWith("(") || !t.endsWith(")")) return t;
+      let depth = 0;
+      for (let i = 0; i < t.length; i++) {
+        const c = t[i];
+        if (c === "(") depth++;
+        else if (c === ")") {
+          depth--;
+          if (depth === 0 && i === t.length - 1) return t.slice(1, -1).trim();
+          if (depth === 0 && i < t.length - 1) return t;
+        }
+      }
+      return t;
+    }
+
+    // Normaliza operadores L→R en todos los niveles (AND/OR), respetando subgrupos
+    function normalizeL2RDeep(s) {
+      // 1) Normalizar recursivamente cada subgrupo
+      let rebuilt = "";
+      for (let i = 0; i < s.length; ) {
+        const c = s[i];
+        if (c === "(") {
+          const j = findMatchingParen(s, i);
+          const inner = s.slice(i + 1, j);
+          const normalizedInner = normalizeL2RDeep(inner);
+          const piece = isWrapped(normalizedInner) ? normalizedInner : `(${normalizedInner})`;
+          rebuilt += piece;
+          i = j + 1;
+        } else {
+          rebuilt += c;
+          i++;
+        }
+      }
+
+      // 2) Tokenizar a nivel top en [expr, OP, expr, OP, expr ...]
+      const tokens = splitTopLevelByOps(rebuilt);
+
+      // 3) Si no hay operadores top-level, devolver tal cual (trim)
+      if (tokens.length === 1) return tokens[0].trim();
+
+      // 4) Plegado L→R
+      let acc = wrapIfNeeded(tokens[0]);
+      for (let k = 1; k < tokens.length; k += 2) {
+        const op  = tokens[k];              // "AND" | "OR"
+        const rhs = wrapIfNeeded(tokens[k + 1]);
+        acc = `(${acc} ${op} ${rhs})`;
+      }
+      return acc;
+    }
+
+    // Divide a nivel top por AND/OR conservando subgrupos
+    function splitTopLevelByOps(s) {
+      const out = [];
+      let depth = 0, buf = "";
+      const isBoundary = (ch) => ch === "" || /[^\w]/.test(ch); // incluye () y espacios
+      const n = s.length;
+
+      for (let i = 0; i < n; ) {
+        const c = s[i];
+
+        if (c === "(") { depth++; buf += c; i++; continue; }
+        if (c === ")") { depth = Math.max(0, depth - 1); buf += c; i++; continue; }
+
+        if (depth === 0) {
+          if (i + 3 <= n && s.substring(i, i + 3).toUpperCase() === "AND") {
+            const prev = i > 0 ? s[i - 1] : "";
+            const next = i + 3 < n ? s[i + 3] : "";
+            if (isBoundary(prev) && isBoundary(next)) {
+              out.push(buf.trim()); buf = ""; i += 3;
+              out.push("AND");
+              continue;
+            }
+          }
+          if (i + 2 <= n && s.substring(i, i + 2).toUpperCase() === "OR") {
+            const prev = i > 0 ? s[i - 1] : "";
+            const next = i + 2 < n ? s[i + 2] : "";
+            if (isBoundary(prev) && isBoundary(next)) {
+              out.push(buf.trim()); buf = ""; i += 2;
+              out.push("OR");
+              continue;
+            }
+          }
+        }
+
+        buf += c; i++;
+      }
+
+      if (buf.trim().length) out.push(buf.trim());
+      if (out.length === 0) out.push(s.trim());
+      return out;
+    }
+
+    function wrapIfNeeded(expr) {
+      const t = expr.trim();
+      return isWrapped(t) ? t : `(${t})`;
+    }
+
+    // Índice del ')' que cierra el '(' en posición i
+    function findMatchingParen(s, i) {
+      let depth = 0;
+      for (let k = i; k < s.length; k++) {
+        if (s[k] === "(") depth++;
+        else if (s[k] === ")") {
+          depth--;
+          if (depth === 0) return k;
+        }
+      }
+      return s.length - 1; // fallback (balanceParens ya corrió)
+    }
+
+    // ¿Está completamente envuelto por un par de paréntesis?
+    function isWrapped(t) {
+      const s = t.trim();
+      if (!s.startsWith("(") || !s.endsWith(")")) return false;
+      let depth = 0;
+      for (let i = 0; i < s.length; i++) {
+        const ch = s[i];
+        if (ch === "(") depth++;
+        else if (ch === ")") {
+          depth--;
+          if (depth === 0 && i < s.length - 1) return false;
+        }
+      }
+      return depth === 0;
+    }
+
     
     uiQueryInputTranslate.addEventListener('input', (event) => {
         uiQuery = event.target.value;
